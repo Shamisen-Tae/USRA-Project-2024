@@ -151,7 +151,10 @@ for i in range(r_cell.shape[1]):
     tau[i] = np.zeros((poly_n, 2))
     lambda_curr[i] = 0.5
 
-
+cell_centroid = dict()
+for i in range(r_cell.shape[1]):
+    cell_centroid[i] = np.array([]).reshape((2,-1))
+    cell_centroid[i] = np.append(cell_centroid[i], r_cell[:,i][:, newaxis], axis=1)
 
 
 #boundary is x = 60, y = 60, x = -60, y = -60 resptively
@@ -546,7 +549,7 @@ while n<num_steps:
             
         point = np.mean(points_0[i], axis=1)  ### shape (2,)
         r_cell_0 = np.append(r_cell_0, point[:, newaxis], axis=1)
-
+        cell_centroid[i] = np.append(cell_centroid[i], point[:, newaxis], axis=1)
         
 
 
@@ -601,13 +604,14 @@ while n<num_steps:
     plt.scatter(0, 0, color='red')
     # plt.title(n)
     
-    dolfin.plot(u_TGbeta)
+    # dolfin.plot(u_TGbeta)
     #dolfin.plot(mesh, title = 'mesh')
    
     for j in np.arange(r_cell.shape[1]):
         #plt.plot(r_cell[0, j] + R * np.cos(plot_phi), r_cell[1, j] + R * np.sin(plot_phi), linewidth=0.9,color='blue')
        
         plt.plot(points_0[j][0], points_0[j][1],color='blue',linewidth=2.5)
+
 
         #plt.plot(points_plot[j][0], points_plot[j][1], color='red',linewidth=2.5)
 
@@ -622,8 +626,16 @@ while n<num_steps:
         x_coords = points[j][0]
         y_coords = points[j][1]
 
+        
+
+
         # Fill the region enclosed by the points with white color
         plt.fill(x_coords, y_coords, 'white')
+        plt.scatter(cell_centroid[j][0],cell_centroid[j][1],s=0.1,color='black')
+        plt.plot(cell_centroid[j][0], cell_centroid[j][1],markersize=0.3, color='black')
+
+    
+   
 
 
 
