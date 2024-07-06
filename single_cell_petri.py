@@ -66,7 +66,20 @@ def distance(point1, point2):
     return np.sqrt((point1[0]-point2[0])**2 + (point1[1]-point2[1])**2)
 
 
+def create_boundary_mesh(coordinates):
+    x_coords = coordinates[0]
+    y_coords = coordinates[1]
 
+    # Create list of Points from x_coords and y_coords
+    points_list = [Point(x, y) for x, y in zip(x_coords, y_coords)]
+    # Create Polygon from the list of points
+    polygon = Polygon(points_list)
+    # Generate the mesh
+    mesh = generate_mesh(polygon, 10)
+
+    boundarymesh = BoundaryMesh(mesh, "exterior", True)
+
+    return boundarymesh
 
 ##########################################################
 ## Parameters' Value
@@ -116,7 +129,8 @@ plot_phi = np.arange(0, 2*np.pi, 0.01) # angles to plot circle
 #### set initial position of cells
 #r_cell=np.array([[50,50,-50,-50],[30,-30,-30,30]])
 
-r_cell = np.array([[20,20,-20,-20, 10, -10, -10, 10],[20,-20,-20,20, -10, 10, -10,10]])
+# r_cell = np.array([[20,20,-20,-20, 10, -10, -10, 10],[20,-20,-20,20, -10, 10, -10,10]])
+r_cell = np.array([[20],[20]])
 #r_cell = np.array([[10, -10, -10, 10],[-10, 10, -10,10]])
 r_cell_plot = r_cell
 
@@ -239,13 +253,28 @@ def repel_force(point):
     #print(result[0],result[1])
     return result
 
-lj_distance = 2*R+1
-lj_strength = 0.3
+lj_distance = 0.5
+lj_strength = 0.01
 def lennard_jones(d):
-    d = max(10,d)
-    return 4*lj_strength*((lj_distance/d)**12-(lj_distance/d)**6)
+    d[d < lj_distance*0.6] = lj_distance*0.6
+    return 4*lj_strength*((lj_distance/d)**12-(lj_distance/d)**6) 
 
+def get_lj_forces(points):
+    for i in range(0, r_cell.shape[1]-1):
+        for j in range(i + 1, r_cell.shape[1]):
+            dx = points[i][0][:, np.newaxis]-points[j][0]
+            dy = points[i][1][:, np.newaxis]-points[j][1]
+            distances = np.sqrt(dx**2 + dy**2)
+            forces = lennard_jones(distances)
+            fx = forces * dx
+            fy = forces * dy
 
+            points[i][0] += np.sum(fx, axis=1) * dt 
+            points[i][1] += np.sum(fy, axis=1) * dt
+
+            points[j][0] -= np.sum(fx, axis=0) * dt
+            points[j][1] -= np.sum(fy, axis=0) * dt
+            
 
 
 ### mesh info about index stuff
@@ -350,7 +379,8 @@ num_steps = 100
 t = 0.0
 T = dt*num_steps
 
-
+vtkfile_TGbeta = File('u_TGbeta/solution.pvd')
+vtkfile_cell = File('cell/solution.pvd')
 
 while n<num_steps:
     print('*************************************', '\n', n, '\n')
@@ -397,8 +427,9 @@ while n<num_steps:
 
         # extract gradu as a function
         gradu_TGbeta = project(grad(u_TGbeta))
-        # vtkfile_TGbeta << (u_TGbeta_n, t)
-        # u_TGbeta_n.assign(u_TGbeta)
+        u_TGbeta_n.assign(u_TGbeta)
+        vtkfile_TGbeta << (u_TGbeta_n, t)
+        
         print('u_TGbeta_max: ', max(u_TGbeta.vector().get_local()))
         u_TGbeta_max_list.append(max(u_TGbeta.vector().get_local()))
 
@@ -500,18 +531,18 @@ while n<num_steps:
 
 
         for j in range(points[i].shape[1]):        
-            if (j == 0):
-                tau[i][j] = (points[i][:,j+1] - points[i][:,j] * 2 + points[i][:,poly_n-1]) / \
-                        (distance(points[i][:,j+1],points[i][:,j])*distance(points[i][:,j],points[i][:,poly_n-1]))
+            # if (j == 0):
+            #     tau[i][j] = (points[i][:,j+1] - points[i][:,j] * 2 + points[i][:,poly_n-1]) / \
+            #             (distance(points[i][:,j+1],points[i][:,j])*distance(points[i][:,j],points[i][:,poly_n-1]))
                 
-            elif (j == poly_n-1):
-                tau[i][j] = (points[i][:,0] - points[i][:,j] * 2 + points[i][:,j-1]) / \
-                        (distance(points[i][:,0],points[i][:,j])*distance(points[i][:,j],points[i][:,j-1]))
-                #print(tau[i][j][0],tau[i][j][1])
+            # elif (j == poly_n-1):
+            #     tau[i][j] = (points[i][:,0] - points[i][:,j] * 2 + points[i][:,j-1]) / \
+            #             (distance(points[i][:,0],points[i][:,j])*distance(points[i][:,j],points[i][:,j-1]))
+            #     #print(tau[i][j][0],tau[i][j][1])
                 
-            else:
-                tau[i][j] = (points[i][:,j+1] - points[i][:,j] * 2 + points[i][:,j-1]) / \
-                        (distance(points[i][:,j+1],points[i][:,j])*distance(points[i][:,j],points[i][:,j-1]))
+            # else:
+            #     tau[i][j] = (points[i][:,j+1] - points[i][:,j] * 2 + points[i][:,j-1]) / \
+            #             (distance(points[i][:,j+1],points[i][:,j])*distance(points[i][:,j],points[i][:,j-1]))
             
             force = repel_force(points[i][:, j])
             repel[0]  = force[0] if abs(force[0]) > abs(repel[0]) else repel[0]
@@ -533,7 +564,7 @@ while n<num_steps:
                 #     np.array([lambda_curr[i],lambda_curr[i]]) * dt +\
                 #           alpha*tau[i][j]*dt
                 points_0[i][:,j] = points[i][:, j] + rw + alpha*np.array(tau[i][j])*dt +\
-                      np.array([lambda_curr[i],lambda_curr[i]]) * dt + repel + lj_force#
+                      np.array([lambda_curr[i],lambda_curr[i]]) * dt + repel*dt
                 #print(alpha*tau[j][0]*dt,alpha*tau[j][1]*dt)
                 #points_0[i][:,j] = points[i][:, j] + alpha*np.array(tau[i][j])*dt
                 
@@ -541,7 +572,7 @@ while n<num_steps:
             else:
                 recover_flag[i]=0
                 points_0[i][:,j] = points[i][:, j] + rw + alpha*np.array(tau[i][j])*dt +\
-                      np.array([lambda_curr[i],lambda_curr[i]]) * dt + repel + lj_force#
+                      np.array([lambda_curr[i],lambda_curr[i]]) * dt + repel * dt
 
        
                          
@@ -556,10 +587,19 @@ while n<num_steps:
 
    
 
-
+    get_lj_forces(points_0)
     # update the positions
     r_cell=deepcopy(r_cell_0)
     points=deepcopy(points_0)
+
+
+
+    for key in points:
+        fenics_mesh = create_boundary_mesh(points[key])
+        # mesh_file = File(f"boundary_mesh_{key}_{step}.pvd")
+        # mesh_file << fenics_mesh
+
+        vtkfile_cell << (fenics_mesh , t)
 
 
 
