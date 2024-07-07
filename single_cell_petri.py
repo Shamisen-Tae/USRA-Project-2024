@@ -97,7 +97,7 @@ rho=1E4 # fibrin and collagen constant
 rho_v=2.5 # speed of biased movement for the cells
 rho_morpho=1
 
-mu_TGbeta=7
+mu_TGbeta=1.5
 
 ##########################################################
 ## settings of cell moving
@@ -115,7 +115,7 @@ mu_TGbeta=7
 ##########################################################
 mean = [0,0] # mean of rw
 cov = [[1,0], [0,1]] # covariance of rw
-sigma_rw=3 # size of rw
+sigma_rw=1 # size of rw
 
 dt=0.05 #time
 
@@ -129,9 +129,9 @@ plot_phi = np.arange(0, 2*np.pi, 0.01) # angles to plot circle
 #### set initial position of cells
 #r_cell=np.array([[50,50,-50,-50],[30,-30,-30,30]])
 
-# r_cell = np.array([[20,20,-20,-20, 10, -10, -10, 10],[20,-20,-20,20, -10, 10, -10,10]])
-r_cell = np.array([[20],[20]])
-#r_cell = np.array([[10, -10, -10, 10],[-10, 10, -10,10]])
+r_cell = np.array([[20,20,-20,-20, 10, -10, -10, 10],[20,-20,-20,20, -10, 10, -10,10]])
+#r_cell = np.array([[20],[20]])
+# r_cell = np.array([[10, -10, -10, 10],[-10, 10, -10,10]])
 r_cell_plot = r_cell
 
 r_cell_disp = np.zeros(np.shape(r_cell))  # normal fibroblasts positions
@@ -156,7 +156,7 @@ beta_one = 0.2
 beta_two = 0.001
 lambda_curr = dict()
 
-alpha = 2
+alpha = 0.5
 
 
 
@@ -227,6 +227,12 @@ else:
 for i in points_plot:
     points_plot[i] = np.append(points_plot[i], points_plot[i][:, 0][:, np.newaxis], axis=1)
 
+area_plot = dict()
+for i in range(r_cell.shape[1]):
+    area_plot[i] = np.array([])
+
+
+
 ############################################################
 ##FEniCS mesh settings
 ############################################################
@@ -240,7 +246,18 @@ meshpoints=mesh.coordinates()
 parameters['reorder_dofs_serial'] = False
 
 
-
+# calculate vertex unit normal vector
+# find the outward unit normal vector to the neightboring edge by normalizing (-dy,dx)
+# then take their sum and normalize again
+def vertex_normal(points, j):
+    curr_node = j
+    prev_node = (j-1)%(points.shape[1])  
+    next_node = (j+1)%(points.shape[1]) 
+    prev_edge_normal = np.array([-1*(points[:,curr_node][1]-points[:,prev_node][1]), points[:,curr_node][0]-points[:,prev_node][0]])
+    next_edge_normal= np.array([-1*(points[:,next_node][1]-points[:,curr_node][1]), points[:,next_node][0]-points[:,curr_node][0]])
+    prev_edge_normal = prev_edge_normal / np.linalg.norm(prev_edge_normal)
+    next_edge_normal = next_edge_normal / np.linalg.norm(next_edge_normal)
+    return (prev_edge_normal+next_edge_normal) / np.linalg.norm(prev_edge_normal+next_edge_normal)
 
 def repel_strength(d):
     return 0.5*max(sigma_rw-d,0)*exp(1/d)
@@ -253,9 +270,10 @@ def repel_force(point):
     #print(result[0],result[1])
     return result
 
-lj_distance = 0.5
-lj_strength = 0.01
+lj_distance = 0.7
+lj_strength = 0.02
 def lennard_jones(d):
+    d = np.atleast_1d(d)
     d[d < lj_distance*0.6] = lj_distance*0.6
     return 4*lj_strength*((lj_distance/d)**12-(lj_distance/d)**6) 
 
@@ -274,7 +292,6 @@ def get_lj_forces(points):
 
             points[j][0] -= np.sum(fx, axis=0) * dt
             points[j][1] -= np.sum(fy, axis=0) * dt
-            
 
 
 ### mesh info about index stuff
@@ -380,7 +397,10 @@ t = 0.0
 T = dt*num_steps
 
 vtkfile_TGbeta = File('u_TGbeta/solution.pvd')
-vtkfile_cell = File('cell/solution.pvd')
+
+cell_dict = dict()
+for i in range(r_cell.shape[1]):
+    cell_dict[i] = File(f'cell/solution{i}.pvd')
 
 while n<num_steps:
     print('*************************************', '\n', n, '\n')
@@ -460,6 +480,13 @@ while n<num_steps:
                 points = copy(points_2)
             elif cell_type[i] == 3:
                 points = copy(points_3)
+            fenics_mesh = create_boundary_mesh(points[i])
+            # mesh_file = File(f"boundary_mesh_{key}_{step}.pvd")
+            # mesh_file << fenics_mesh
+
+            cell_dict[i] << (fenics_mesh , t)
+            
+
 
         if u_TGbeta_n(c1)>0.08:
             # cell_type[i] = 1
@@ -530,49 +557,55 @@ while n<num_steps:
         
 
 
-        for j in range(points[i].shape[1]):        
+        for j in range(points[i].shape[1]):
+            prev_node = (j-1)%(points[i].shape[1])  
+            next_node = (j+1)%(points[i].shape[1])  
+            tau[i][j] = (points[i][:,next_node] - points[i][:,j] * 2 + points[i][:,prev_node]) / \
+                        (distance(points[i][:,next_node],points[i][:,j])*distance(points[i][:,j],points[i][:,prev_node]))
             # if (j == 0):
             #     tau[i][j] = (points[i][:,j+1] - points[i][:,j] * 2 + points[i][:,poly_n-1]) / \
             #             (distance(points[i][:,j+1],points[i][:,j])*distance(points[i][:,j],points[i][:,poly_n-1]))
-                
+            #     # tau[i][j] = (points[i][:,j+1] - points[i][:,j] * 2 + points[i][:,poly_n-1]) / h**2
             # elif (j == poly_n-1):
             #     tau[i][j] = (points[i][:,0] - points[i][:,j] * 2 + points[i][:,j-1]) / \
             #             (distance(points[i][:,0],points[i][:,j])*distance(points[i][:,j],points[i][:,j-1]))
             #     #print(tau[i][j][0],tau[i][j][1])
-                
+            #     #tau[i][j] = (points[i][:,0] - points[i][:,j] * 2 + points[i][:,j-1]) / h**2
             # else:
             #     tau[i][j] = (points[i][:,j+1] - points[i][:,j] * 2 + points[i][:,j-1]) / \
             #             (distance(points[i][:,j+1],points[i][:,j])*distance(points[i][:,j],points[i][:,j-1]))
+            #     #tau[i][j] = (points[i][:,j+1] - points[i][:,j] * 2 + points[i][:,j-1]) / h**2
             
             force = repel_force(points[i][:, j])
             repel[0]  = force[0] if abs(force[0]) > abs(repel[0]) else repel[0]
             repel[1] = force[1] if abs(force[1]) > abs(repel[1]) else repel[1]
 
-        lj_force = np.array([0.0,0.0])
-        for m in range(r_cell.shape[1]):
-            if m != i:
-                lj_force += lennard_jones(distance(r_cell[:,m],r_cell[:,i]))*(r_cell[:,i]-r_cell[:,m])/np.linalg.norm(r_cell[:,m]-r_cell[:,i])
+        # lj_force = np.array([0.0,0.0])
+        # for m in range(r_cell.shape[1]):
+        #     if m != i:
+        #         lj_force += lennard_jones(distance(r_cell[:,m],r_cell[:,i]))*(r_cell[:,i]-r_cell[:,m])/np.linalg.norm(r_cell[:,m]-r_cell[:,i])
 
 
 
        
         for j in range(points[i].shape[1]):
             if max(u_TGbeta.vector().get_local())>1E-7 and all(np.linalg.norm(points[i],axis=0)>2) and recover_flag[i]:
-                # points_0[i][:,j] = points[i][:, j] +\
-                #     rw + \
-                #     mu_TGbeta*gradu_TGbeta(points[i][:,j])/np.linalg.norm(gradu_TGbeta(c1))*dt +\
-                #     np.array([lambda_curr[i],lambda_curr[i]]) * dt +\
-                #           alpha*tau[i][j]*dt
-                points_0[i][:,j] = points[i][:, j] + rw + alpha*np.array(tau[i][j])*dt +\
-                      np.array([lambda_curr[i],lambda_curr[i]]) * dt + repel*dt
+                points_0[i][:,j] = points[i][:, j] +\
+                    rw + \
+                    mu_TGbeta*gradu_TGbeta(points[i][:,j])/np.linalg.norm(gradu_TGbeta(c1))*dt +\
+                    lambda_curr[i] * vertex_normal(points[i], j)* dt   + repel * dt +\
+                          alpha*tau[i][j]*dt
+                # points_0[i][:,j] = points[i][:, j] + rw + alpha*np.array(tau[i][j])*dt +\
+                #       np.array([lambda_curr[i],lambda_curr[i]]) * dt + repel + lj_force#
                 #print(alpha*tau[j][0]*dt,alpha*tau[j][1]*dt)
-                #points_0[i][:,j] = points[i][:, j] + alpha*np.array(tau[i][j])*dt
+                # points_0[i][:,j] = points[i][:, j] + lambda_curr[i] * vertex_normal(points[i], j)* dt 
                 
 
             else:
                 recover_flag[i]=0
                 points_0[i][:,j] = points[i][:, j] + rw + alpha*np.array(tau[i][j])*dt +\
-                      np.array([lambda_curr[i],lambda_curr[i]]) * dt + repel * dt
+                      lambda_curr[i] * vertex_normal(points[i], j)* dt + repel * dt
+                #points_0[i][:,j] = points[i][:, j] + lambda_curr[i] * vertex_normal(points[i], j)* dt 
 
        
                          
@@ -588,6 +621,7 @@ while n<num_steps:
    
 
     get_lj_forces(points_0)
+    
     # update the positions
     r_cell=deepcopy(r_cell_0)
     points=deepcopy(points_0)
@@ -599,17 +633,18 @@ while n<num_steps:
         # mesh_file = File(f"boundary_mesh_{key}_{step}.pvd")
         # mesh_file << fenics_mesh
 
-        vtkfile_cell << (fenics_mesh , t)
+        cell_dict[key] << (fenics_mesh , t)
 
 
 
-    ## check the wound area by 3 dfferent approaches
+     ## check the wound area by 3 dfferent approaches
     ## shoelace method to calculate the polygon area
     for j in range(r_cell.shape[1]):
         cell_area[j]= PolyArea(points[j][0],points[j][1])
         points_0[j] = np.append(points_0[j], points_0[j][:, 0][:, np.newaxis], axis=1)
-        print('%s -th cell area(A_SL): %s' % (j, cell_area))
-        print('%s -th cell area ratio(A_SL): %s' %(j, cell_area / (pi*R**2)))
+        area_plot[j] = np.append(area_plot[j],cell_area[j])
+        print('%s -th cell area(A_SL): %s' % (j, cell_area[j]))
+        print('%s -th cell area ratio(A_SL): %s' %(j, cell_area[j] / (pi*R**2)))
 
     for j in range(r_cell.shape[1]):
         dlambda = (beta_one*lambda_curr[i]*(cell_area[j]-area_int+(cell_area[j]-area_prev[j])/dt))/(area_int*(lambda_curr[i]+beta_one))-\
@@ -620,7 +655,7 @@ while n<num_steps:
         print("next lambda value:", lambda_curr[i])
     
     ### update cytokines concentration
-    u_TGbeta_n.assign(u_TGbeta)
+   # u_TGbeta_n.assign(u_TGbeta)
 
     ### iteration update
     n = n + 1
@@ -640,6 +675,7 @@ while n<num_steps:
     # # plt.figure('Simulations')
     plt.xlim([-domain_radius, domain_radius])
     plt.ylim([-domain_radius, domain_radius])
+    #plt.ylim([40, 150])
     plt.tick_params(which='major', labelsize=30)
     plt.scatter(0, 0, color='red')
     # plt.title(n)
@@ -651,8 +687,9 @@ while n<num_steps:
         #plt.plot(r_cell[0, j] + R * np.cos(plot_phi), r_cell[1, j] + R * np.sin(plot_phi), linewidth=0.9,color='blue')
        
         plt.plot(points_0[j][0], points_0[j][1],color='blue',linewidth=2.5)
-
-
+        
+       # plt.plot(n-30,cell_area[j],'ro')
+       
         #plt.plot(points_plot[j][0], points_plot[j][1], color='red',linewidth=2.5)
 
         # for i in range(points[i].shape[1]):
@@ -683,6 +720,3 @@ while n<num_steps:
 
     plt.pause(0.0001)
     plt.show()
-
-
-
